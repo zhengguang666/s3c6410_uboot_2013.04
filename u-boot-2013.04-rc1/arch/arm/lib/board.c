@@ -585,7 +585,7 @@ void board_init_r(gd_t *id, ulong dest_addr)
 # endif /* CONFIG_SYS_FLASH_CHECKSUM */
 	} else {
 		puts(failed);
-		hang();
+		//hang();
 	}
 #endif
 
