@@ -105,7 +105,7 @@ static struct nand_ecclayout nand_oob_128 = {
 	.oobfree = {
 		{.offset = 2,
 		 .length = 78} }
-};
+};	
 
 static int nand_get_device(struct nand_chip *chip, struct mtd_info *mtd,
 			   int new_state);
@@ -2621,7 +2621,9 @@ static const struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 
 	/* Read manufacturer and device IDs */
 	*maf_id = chip->read_byte(mtd);
-	*dev_id = chip->read_byte(mtd);
+	*maf_id = chip->read_byte(mtd);
+	*dev_id = chip->read_byte(mtd);		
+	printk(KERN_INFO "01Manufacturer:0x%02x Chip ID:0x%02x\n",*maf_id, *dev_id);
 
 	/* Try again to make sure, as some systems the bus-hold or other
 	 * interface concerns can cause random data which looks like a
@@ -2630,9 +2632,12 @@ static const struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 	 */
 
 	chip->cmdfunc(mtd, NAND_CMD_READID, 0x00, -1);
+	printk(KERN_INFO "02Manufacturer:0x%02x Chip ID:0x%02x\n",*maf_id, *dev_id);
 
-	for (i = 0; i < 2; i++)
+	for (i = 0; i < 3; i++)
 		id_data[i] = chip->read_byte(mtd);
+	for (i = 0; i < 2; i++)
+		id_data[i] = id_data[i + 1];
 
 	if (id_data[0] != *maf_id || id_data[1] != *dev_id) {
 		printk(KERN_INFO "%s: second ID read did not match "
@@ -2662,6 +2667,8 @@ static const struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 
 	for (i = 0; i < 8; i++)
 		id_data[i] = chip->read_byte(mtd);
+	for (i = 0; i < 7; i++)
+		id_data[i] = id_data[i + 1];
 
 	if (!type->name)
 		return ERR_PTR(-ENODEV);
@@ -2674,83 +2681,18 @@ static const struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 	if (!type->pagesize && chip->init_size) {
 		/* set the pagesize, oobsize, erasesize by the driver*/
 		busw = chip->init_size(mtd, chip, id_data);
-	} else if (!type->pagesize) {
-		int extid;
-		/* The 3rd id byte holds MLC / multichip data */
-		chip->cellinfo = id_data[2];
-		/* The 4th id byte is the important one */
-		extid = id_data[3];
-
-		/*
-		 * Field definitions are in the following datasheets:
-		 * Old style (4,5 byte ID): Samsung K9GAG08U0M (p.32)
-		 * New style   (6 byte ID): Samsung K9GBG08U0M (p.40)
-		 *
-		 * Check for wraparound + Samsung ID + nonzero 6th byte
-		 * to decide what to do.
-		 */
-		if (id_data[0] == id_data[6] && id_data[1] == id_data[7] &&
-				id_data[0] == NAND_MFR_SAMSUNG &&
-				(chip->cellinfo & NAND_CI_CELLTYPE_MSK) &&
-				id_data[5] != 0x00) {
-			/* Calc pagesize */
-			mtd->writesize = 2048 << (extid & 0x03);
-			extid >>= 2;
-			/* Calc oobsize */
-			switch (extid & 0x03) {
-			case 1:
-				mtd->oobsize = 128;
-				break;
-			case 2:
-				mtd->oobsize = 218;
-				break;
-			case 3:
-				mtd->oobsize = 400;
-				break;
-			default:
-				mtd->oobsize = 436;
-				break;
-			}
-			extid >>= 2;
-			/* Calc blocksize */
-			mtd->erasesize = (128 * 1024) <<
-				(((extid >> 1) & 0x04) | (extid & 0x03));
-			busw = 0;
-		} else {
-			/* Calc pagesize */
-			mtd->writesize = 1024 << (extid & 0x03);
-			extid >>= 2;
-			/* Calc oobsize */
-			mtd->oobsize = (8 << (extid & 0x01)) *
-				(mtd->writesize >> 9);
-			extid >>= 2;
-			/* Calc blocksize. Blocksize is multiples of 64KiB */
-			mtd->erasesize = (64 * 1024) << (extid & 0x03);
-			extid >>= 2;
-			/* Get buswidth information */
-			busw = (extid & 0x01) ? NAND_BUSWIDTH_16 : 0;
-		}
-	} else {
+	}  else {
 		/*
 		 * Old devices have chip data hardcoded in the device id table
 		 */
+		if(*maf_id == 0x2c && *dev_id==0x38)
+		{
+			mtd->oobsize = 128;
+		}
 		mtd->erasesize = type->erasesize;
 		mtd->writesize = type->pagesize;
-		mtd->oobsize = mtd->writesize / 32;
 		busw = type->options & NAND_BUSWIDTH_16;
 
-		/*
-		 * Check for Spansion/AMD ID + repeating 5th, 6th byte since
-		 * some Spansion chips have erasesize that conflicts with size
-		 * listed in nand_ids table
-		 * Data sheet (5 byte ID): Spansion S30ML-P ORNAND (p.39)
-		 */
-		if (*maf_id == NAND_MFR_AMD && id_data[4] != 0x00 &&
-				id_data[5] == 0x00 && id_data[6] == 0x00 &&
-				id_data[7] == 0x00 && mtd->writesize == 512) {
-			mtd->erasesize = 128 * 1024;
-			mtd->erasesize <<= ((id_data[3] & 0x03) << 1);
-		}
 	}
 	/* Get chip options, preserve non chip based options */
 	chip->options |= type->options;
